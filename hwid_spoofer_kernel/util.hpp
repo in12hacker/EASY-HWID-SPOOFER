@@ -93,6 +93,24 @@ namespace n_util
 		return true;
 	}
 
+	bool SafeReadKrnlAddr(PVOID TargetAddress, PVOID AllocatedBuffer, ULONG LengthYouWantToRead)
+	{
+		bool b = false;
+		PHYSICAL_ADDRESS PA;
+		PA = MmGetPhysicalAddress(TargetAddress);
+		if (PA.QuadPart)
+		{
+			PVOID  NewVA = MmMapIoSpace(PA, LengthYouWantToRead, MmNonCached);
+			if (NewVA)
+			{
+				memcpy(AllocatedBuffer, NewVA, LengthYouWantToRead);
+				MmUnmapIoSpace(NewVA, LengthYouWantToRead);
+				b = true;
+			}
+		}
+		return b;
+	}
+
 	bool pattern_check(const char* data, const char* pattern, const char* mask)
 	{
 		size_t len = strlen(mask);
@@ -203,7 +221,7 @@ namespace n_util
 
 	bool change_ioc(PIO_STACK_LOCATION ioc, PIRP irp, PIO_COMPLETION_ROUTINE routine)
 	{
-		PIOC_REQUEST request = (PIOC_REQUEST)ExAllocatePool(NonPagedPool, sizeof(IOC_REQUEST));
+		PIOC_REQUEST request = (PIOC_REQUEST)ExAllocatePoolWithTag(NonPagedPool, sizeof(IOC_REQUEST),'1coi');
 		if (request == 0) return false;
 
 		request->Buffer = irp->AssociatedIrp.SystemBuffer;

@@ -2,6 +2,7 @@
 #include "disk.hpp"
 #include "gpu.hpp"
 #include "nic.hpp"
+#pragma warning(disable:4189)
 
 #define ioctl_disk_customize_serial CTL_CODE(FILE_DEVICE_UNKNOWN, 0x500, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
 #define ioctl_disk_random_serial CTL_CODE(FILE_DEVICE_UNKNOWN, 0x501, METHOD_OUT_DIRECT, FILE_ANY_ACCESS)
@@ -64,7 +65,7 @@ NTSTATUS CreateIrp(PDEVICE_OBJECT device, PIRP irp)
 {
 	irp->IoStatus.Status = STATUS_SUCCESS;
 	irp->IoStatus.Information = 0;
-
+	PDEVICE_OBJECT _device = device;
 	IoCompleteRequest(irp, IO_NO_INCREMENT);
 	return STATUS_SUCCESS;
 }
@@ -73,7 +74,7 @@ NTSTATUS CloseIrp(PDEVICE_OBJECT device, PIRP irp)
 {
 	irp->IoStatus.Status = STATUS_SUCCESS;
 	irp->IoStatus.Information = 0;
-
+	PDEVICE_OBJECT _device = device;
 	IoCompleteRequest(irp, IO_NO_INCREMENT);
 	return STATUS_SUCCESS;
 }
@@ -81,7 +82,7 @@ NTSTATUS CloseIrp(PDEVICE_OBJECT device, PIRP irp)
 NTSTATUS ControlIrp(PDEVICE_OBJECT device, PIRP irp)
 {
 	PIO_STACK_LOCATION io = IoGetCurrentIrpStackLocation(irp);
-
+	PDEVICE_OBJECT _device = device;
 	common_buffer common{ 0 };
 	RtlCopyMemory(&common, irp->AssociatedIrp.SystemBuffer, sizeof(common));
 
@@ -178,6 +179,8 @@ extern "C" void DriverUnload(PDRIVER_OBJECT driver)
 extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING unicode)
 {
 	n_log::printf("entry \n");
+
+	PUNICODE_STRING _unicode = unicode;
 
 	driver->DriverUnload = DriverUnload;
 

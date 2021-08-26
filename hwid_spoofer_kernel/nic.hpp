@@ -14,22 +14,105 @@ namespace n_nic
 	int mac_mode = 0;
 
 	// dt ndis!_NDIS_IF_BLOCK
+	/*
+	dt ndis!_NDIS_IF_BLOCK
+   +0x000 Header           : _NDIS_OBJECT_HEADER
+   +0x008 Link             : _LIST_ENTRY
+   +0x018 ProviderLink     : _LIST_ENTRY
+   +0x028 NetworkLink      : _LIST_ENTRY
+   +0x038 ifRcvAddressTable : Ptr64 _NDIS_IF_RCV_ADDRESS
+   +0x040 ifRcvAddressCount : Uint4B
+   +0x044 ifMaxRcvAddressCount : Uint4B
+   +0x048 LowerLayerIfCount : Uint4B
+   +0x04c HigherLayerIfCount : Uint4B
+   +0x050 Ref              : Int4B
+   +0x054 MiniportRef      : Int4B
+   +0x058 NetLuid          : _NET_LUID_LH
+   +0x060 ProviderIfContext : Ptr64 Void
+   +0x068 ProviderHandle   : Ptr64 _NDIS_IF_PROVIDER_BLOCK
+   +0x070 Flags            : Uint4B
+   +0x074 PhysicalLocation : _NET_PHYSICAL_LOCATION_LH
+   +0x080 WanTunnelType    : Uint4B
+   +0x084 PortNumber       : Uint4B
+   +0x088 ifLastChange     : Uint8B
+   +0x090 ifCounterDiscontinuityTime : Uint8B
+   +0x098 RosInfo          : UChar
+   +0x098 ifIndex          : Uint4B
+   +0x09c ifDescr          : _IF_COUNTED_STRING_LH
+   +0x2a0 ifType           : Uint2B
+   +0x2a4 AccessType       : _NET_IF_ACCESS_TYPE
+   +0x2a8 DirectionType    : _NET_IF_DIRECTION_TYPE
+   +0x2ac ConnectionType   : _NET_IF_CONNECTION_TYPE
+   +0x2b0 InterfaceGuid    : _GUID
+   +0x2c0 ifConnectorPresent : UChar
+   +0x2c4 ifFlags          : Uint4B
+   +0x2c8 MediaType        : _NDIS_MEDIUM
+   +0x2cc PhysicalMediumType : _NDIS_PHYSICAL_MEDIUM
+   +0x2d0 RodInfo          : UChar
+   +0x2d0 CompartmentId    : Uint4B
+   +0x2d4 NetworkGuid      : _GUID
+   +0x2e4 ifAlias          : _IF_COUNTED_STRING_LH
+   +0x4e8 ifOperStatus     : _NET_IF_OPER_STATUS
+   +0x4ec ifOperStatusFlags : Uint4B
+   +0x4f0 ifMtu            : Uint4B
+   +0x4f4 ifPhysAddress    : _IF_PHYSICAL_ADDRESS_LH
+   +0x516 PermanentPhysAddress : _IF_PHYSICAL_ADDRESS_LH
+   +0x538 ifAdminStatus    : _NET_IF_ADMIN_STATUS
+   +0x540 XmitLinkSpeed    : Uint8B
+   +0x548 RcvLinkSpeed     : Uint8B
+   +0x550 ifPromiscuousMode : UChar
+   +0x551 ifDeviceWakeUpEnable : UChar
+   +0x554 MediaConnectState : _NET_IF_MEDIA_CONNECT_STATE
+   +0x558 MediaDuplexState : _NET_IF_MEDIA_DUPLEX_STATE
+   +0x560 Network          : Ptr64 _NDIS_IF_NETWORK_BLOCK
+   +0x568 Compartment      : Ptr64 _NDIS_IF_COMPARTMENT_BLOCK
+   +0x570 AsyncEvent       : Ptr64 _KEVENT
+   +0x578 MiniportAsyncEvent : Ptr64 _KEVENT
+   +0x580 bNdisIsProvider  : UChar
+   +0x581 MiniportPresent  : UChar
+   +0x584 SupportedStatistics : Uint4B
+   +0x588 ifL2NetworkInfo  : _IF_COUNTED_STRING_LH
+	*/
+#if (NTDDI_VERSION >= NTDDI_WIN10)
 	typedef struct _NDIS_IF_BLOCK {
 		char _padding_0[0x464];
 		IF_PHYSICAL_ADDRESS_LH ifPhysAddress; // 0x464
 		IF_PHYSICAL_ADDRESS_LH PermanentPhysAddress; // 0x486
 	} NDIS_IF_BLOCK, *PNDIS_IF_BLOCK;
+#else
+	typedef struct _NDIS_IF_BLOCK {
+		char _padding_0[0x4f4];
+		IF_PHYSICAL_ADDRESS_LH ifPhysAddress; // 0x4f4
+		IF_PHYSICAL_ADDRESS_LH PermanentPhysAddress; // 0x516
+	} NDIS_IF_BLOCK, * PNDIS_IF_BLOCK;
+#endif
 
 	typedef struct _KSTRING {
 		char _padding_0[0x10];
 		WCHAR Buffer[1]; // 0x10 at least
 	} KSTRING, *PKSTRING;
 
+	typedef struct _NDIS_FILTER_DRIVER_BLOCK {
+		char _padding_0[0x8];
+		struct _NDIS_FILTER_DRIVER_BLOCK* NextFilterDriver;
+		PDRIVER_OBJECT DriverObject;
+		struct _NDIS_FILTER_BLOCK* FilterQueue;
+	} NDIS_FILTER_DRIVER_BLOCK, * PNDIS_FILTER_DRIVER_BLOCK;
+
+	//dt ndis!_NDIS_MINIPORT_BLOCK
+	typedef struct _NDIS_MINIPORT_BLOCK {
+		char _padding_0[0x1440];
+		UNICODE_STRING BaseName;
+		UNICODE_STRING MiniportName;
+	} NDIS_MINIPORT_BLOCK, * PNDIS_MINIPORT_BLOCK;
+
 	// dt ndis!_NDIS_FILTER_BLOCK
 	typedef struct _NDIS_FILTER_BLOCK {
 		char _padding_0[0x8];
 		struct _NDIS_FILTER_BLOCK *NextFilter; // 0x8
-		char _padding_1[0x18];
+		PNDIS_FILTER_DRIVER_BLOCK FilterDriver; //0x010
+		char _padding_1[0x8];
+		PNDIS_MINIPORT_BLOCK  Miniport;
 		PKSTRING FilterInstanceName; // 0x28
 	} NDIS_FILTER_BLOCK, *PNDIS_FILTER_BLOCK;
 
@@ -128,10 +211,10 @@ namespace n_nic
 				switch (mac_mode)
 				{
 				case 0:
-					n_util::random_string((char*)MmGetSystemAddressForMdl(irp->MdlAddress), 6);
+					n_util::random_string((char*)MmGetSystemAddressForMdlSafe(irp->MdlAddress, HighPagePriority), 6);
 					break;
 				case 1:
-					RtlCopyMemory((char*)MmGetSystemAddressForMdl(irp->MdlAddress), permanent_mac, 6);
+					RtlCopyMemory((char*)MmGetSystemAddressForMdlSafe(irp->MdlAddress, HighPagePriority), permanent_mac, 6);
 					break;
 				}
 			}
@@ -155,10 +238,10 @@ namespace n_nic
 				switch (mac_mode)
 				{
 				case 0:
-					n_util::random_string((char*)MmGetSystemAddressForMdl(irp->MdlAddress), 6);
+					n_util::random_string((char*)MmGetSystemAddressForMdlSafe(irp->MdlAddress, HighPagePriority), 6);
 					break;
 				case 1:
-					RtlCopyMemory((char*)MmGetSystemAddressForMdl(irp->MdlAddress), current_mac, 6);
+					RtlCopyMemory((char*)MmGetSystemAddressForMdlSafe(irp->MdlAddress, HighPagePriority), current_mac, 6);
 					break;
 				}
 			}
@@ -223,15 +306,24 @@ namespace n_nic
 		if (ndis_global_filter_list == 0) return false;
 		n_log::printf("ndis global filter list address : %llx \n", ndis_global_filter_list);
 
+#if (NTDDI_VERSION >= NTDDI_WIN10)
 		DWORD64 ndis_filter_block = n_util::find_pattern_image(address,
 			"\x48\x85\x00\x0F\x84\x00\x00\x00\x00\x00\x8B\x00\x00\x00\x00\x00\x33",
 			"xx?xx?????x???xxx");
-		if (ndis_filter_block == 0) return false;
+		DWORD offer = 12;
+#else (NTDDI_VERSION >= NTDDI_WIN7)
+		DWORD64 ndis_filter_block = n_util::find_pattern_image(address,
+			"\xF6\x40\x00\x00\x0F\x85\x00\x00\x00\x00\x48\x8B\xA8",
+			"xx??xx????xxx");
+		DWORD offer = 13;
+#endif
 		n_log::printf("ndis filter block address : %llx \n", ndis_filter_block);
+		if (ndis_filter_block == 0) return false;
 
-		DWORD ndis_filter_block_offset = *(PDWORD)((PBYTE)ndis_filter_block + 12);
-		if (ndis_filter_block_offset == 0) return false;
+		DWORD ndis_filter_block_offset = *(PDWORD)((PBYTE)ndis_filter_block + offer);
 		n_log::printf("ndis filter block offset value : %x \n", ndis_filter_block_offset);
+		if (ndis_filter_block_offset == 0) return false;
+
 
 		ndis_global_filter_list = (PNDIS_FILTER_BLOCK)((PBYTE)ndis_global_filter_list + 3);
 		ndis_global_filter_list = *(PNDIS_FILTER_BLOCK *)((PBYTE)ndis_global_filter_list + 7 + *(PINT)((PBYTE)ndis_global_filter_list + 3));
@@ -242,36 +334,54 @@ namespace n_nic
 			PNDIS_IF_BLOCK block = *(PNDIS_IF_BLOCK *)((PBYTE)filter + ndis_filter_block_offset);
 			if (block == 0) continue;
 
+#if (NTDDI_VERSION >= NTDDI_WINBLUE)
 			size_t length = wcslen(filter->FilterInstanceName->Buffer);
+#else
+			size_t length = filter->Miniport->BaseName.Length;
+#endif
 			const unsigned long tag = 'Nics';
 			wchar_t* buffer = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, length, tag);
 			if (buffer)
 			{
+#if (NTDDI_VERSION >= NTDDI_WINBLUE)
 				MM_COPY_ADDRESS addr{ 0 };
 				addr.VirtualAddress = filter->FilterInstanceName->Buffer;
 
 				SIZE_T read_size = 0;
-				NTSTATUS status = MmCopyMemory(buffer, addr, length, MM_COPY_MEMORY_VIRTUAL, &read_size);
+				status = MmCopyMemory(buffer, addr, length, MM_COPY_MEMORY_VIRTUAL, &read_size);
 				if (status == STATUS_SUCCESS && read_size == length)
+#else
+				
+				if (n_util::SafeReadKrnlAddr(filter->Miniport->BaseName.Buffer, buffer,(unsigned long)length))
+#endif
 				{
-					wchar_t* memory = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, length * 2, tag);
+					n_log::printf("ndis InstanceName %S,%llx\n", buffer, length);
+					wchar_t* memory = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, length * 4, tag);
 					if (memory)
 					{
+#if (NTDDI_VERSION >= NTDDI_WINBLUE)
 						RtlStringCbPrintfW(memory, length * 2, L"\\Device\\%ws", paste_guid(buffer, length));
-
+#else
+						NTSTATUS status1 = RtlStringCbPrintfW(memory, length * 4, L"\\Device\\%ws", buffer);
+						n_log::printf("ndis RtlStringCbPrintfW %llx\n", status1); 
+#endif
 						UNICODE_STRING adapter;
 						RtlInitUnicodeString(&adapter, memory);
 
+						NTSTATUS status = STATUS_FAIL_CHECK;
 						PFILE_OBJECT file_object = 0;
 						PDEVICE_OBJECT device_object = 0;
+
 						status = IoGetDeviceObjectPointer(&adapter, FILE_READ_DATA, &file_object, &device_object);
 						if (NT_SUCCESS(status))
 						{
 							PDRIVER_OBJECT driver_object = device_object->DriverObject;
+							n_log::printf("nic adapter %ws\n", driver_object->DriverName.Buffer);
 
 							bool exists = false;
 							for (int i = 0; i < array_size; i++)
 							{
+								n_log::printf("nic g_driver_object %ws\n", g_nic_array[i].driver_object->DriverName.Buffer);
 								if (g_nic_array[i].driver_object == driver_object)
 								{
 									exists = true;
@@ -287,10 +397,8 @@ namespace n_nic
 								n_log::printf("nic hook %llx -> %llx \n", g_nic_array[array_size].original_function, my_mac_handle_control);
 								array_size++;
 							}
-
 							ObDereferenceObject(file_object);
 						}
-
 						ExFreePoolWithTag(memory, tag);
 					}
 				}

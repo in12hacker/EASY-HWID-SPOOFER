@@ -27,6 +27,7 @@ namespace n_gpu
 				void* buffer = ExAllocatePoolWithTag(NonPagedPool, length, tag);
 				if (buffer)
 				{
+#if (NTDDI_VERSION >= NTDDI_WINBLUE)
 					MM_COPY_ADDRESS addr{ 0 };
 					addr.VirtualAddress = irp->UserBuffer;
 
@@ -34,6 +35,10 @@ namespace n_gpu
 					if (NT_SUCCESS(MmCopyMemory(buffer, addr, length, MM_COPY_MEMORY_VIRTUAL, &copy_size))
 						&& copy_size == length)
 					{
+#else
+					if (n_util::SafeReadKrnlAddr(buffer, irp->UserBuffer, length))
+					{
+#endif
 						const char* gpu = "GPU-";
 						const size_t len = strlen(gpu);
 

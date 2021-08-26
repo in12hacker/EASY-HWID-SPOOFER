@@ -15,11 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <Inf Include="hwid_spoofer_kernel.inf">
-      <Filter>Driver Files</Filter>
-    </Inf>
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="disk.hpp">
       <Filter>hpp</Filter>
     </ClInclude>
