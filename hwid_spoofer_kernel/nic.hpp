@@ -4,6 +4,8 @@
 #include <ifdef.h>
 #include <minwindef.h>
 #include <ntddndis.h>
+#include <Ntifs.h>
+#include <ntddk.h>
 
 namespace n_nic
 {
@@ -12,6 +14,9 @@ namespace n_nic
 
 	bool arp_table_handle = false;
 	int mac_mode = 0;
+
+#define  MAC_SIZE  6
+	UCHAR g_mac[MAC_SIZE] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05 };
 
 	// dt ndis!_NDIS_IF_BLOCK
 	/*
@@ -172,6 +177,152 @@ namespace n_nic
 		}
 
 		return str + index;
+	}
+
+	typedef struct _LG_CONTEXT
+	{
+		PIO_COMPLETION_ROUTINE oldIocomplete;
+		PVOID oldCtx;
+		BOOLEAN bShouldInvolve;
+		PKEVENT pEvent;
+	}LG_CONTEXT, * PLG_CONTEXT;
+
+	NTSTATUS
+		LgCompletion(
+			IN PDEVICE_OBJECT DeviceObject,
+			IN PIRP Irp,
+			IN PVOID Context
+		)
+	{
+		//PIO_STACK_LOCATION irpsp = IoGetCurrentIrpStackLocation(Irp);
+		PIO_STACK_LOCATION irpspNext = IoGetNextIrpStackLocation(Irp);
+		PLG_CONTEXT pCtx = (PLG_CONTEXT)Context;
+
+		if (NT_SUCCESS(Irp->IoStatus.Status))
+		{
+
+			if (pCtx->pEvent)
+			{
+				KeSetEvent(pCtx->pEvent, 0, 0);
+			}
+		}
+
+		irpspNext->Context = pCtx->oldCtx;
+		irpspNext->CompletionRoutine = pCtx->oldIocomplete;
+
+		ExFreePool(Context);
+
+		if (pCtx->bShouldInvolve)
+		{
+			return irpspNext->CompletionRoutine(DeviceObject, Irp, Context);
+		}
+		else
+		{
+			if (Irp->PendingReturned)
+			{
+				IoMarkIrpPending(Irp);
+			}
+			return STATUS_SUCCESS;
+		}
+
+	}
+
+	NTSTATUS LgDeviceControlDispatch(PDEVICE_OBJECT pDeviceObject, PIRP pIrp)
+	{
+#define IOCTL_NSI_GETALLPARAM (0x0012001B)
+#define IOCTL_ARP_TABLE (0x12000F)
+#define NSI_PARAMS_ARP (11)
+		NTSTATUS status = STATUS_UNSUCCESSFUL;
+		PIO_STACK_LOCATION irpStack;
+		ULONG      uIoControlCode;
+
+		irpStack = IoGetCurrentIrpStackLocation(pIrp);
+		uIoControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
+		//KdPrint(("uIoControlCode :%d\n", uIoControlCode));
+
+		if (uIoControlCode == IOCTL_NSI_GETALLPARAM)
+		{
+			KAPC_STATE ApcState;
+			KEVENT Event;
+			PEPROCESS pEprocess = IoGetCurrentProcess();
+			PLG_CONTEXT pContext = (LG_CONTEXT*)ExAllocatePoolWithTag(NonPagedPool, sizeof(LG_CONTEXT),'1isn');
+
+			KeInitializeEvent(&Event, NotificationEvent, 0);
+			pContext->oldIocomplete = irpStack->CompletionRoutine;
+			pContext->oldCtx = irpStack->Context;
+			irpStack->CompletionRoutine = LgCompletion;
+			irpStack->Context = pContext;
+			pContext->pEvent = &Event;
+			if ((irpStack->Control & SL_INVOKE_ON_SUCCESS) == SL_INVOKE_ON_SUCCESS)
+			{
+				pContext->bShouldInvolve = TRUE;
+			}
+			else
+			{
+				pContext->bShouldInvolve = FALSE;
+			}
+			irpStack->Control |= SL_INVOKE_ON_SUCCESS;
+
+			status = g_original_arp_control(pDeviceObject, pIrp);
+			KeWaitForSingleObject(&Event, Executive, 0, 0, 0);
+			if (status == STATUS_SUCCESS)
+			{
+				PVOID pUserBuffer = pIrp->UserBuffer;
+				if (MmIsAddressValid(pUserBuffer))
+				{
+					PVOID pBuffer2 = NULL;
+
+					KeStackAttachProcess(pEprocess, &ApcState);
+
+					{
+						pBuffer2 = (PVOID)*(ULONG*)((PUCHAR)pUserBuffer + 4 * 10);
+						if (pBuffer2 != NULL)
+						{
+							PUCHAR pMac = NULL;
+							//ULONG i = 0;
+
+							PMDL pMdl = IoAllocateMdl((PUCHAR)pBuffer2 + 0x1186/* + 1968 * i*/, MAC_SIZE, FALSE, FALSE, NULL);
+
+							__try
+							{
+								MmProbeAndLockPages(pMdl, UserMode, IoWriteAccess);
+							}
+							__except (EXCEPTION_EXECUTE_HANDLER)
+							{
+								IoFreeMdl(pMdl);
+								goto label;
+							}
+
+							if (pMdl->MdlFlags & ((MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)))
+							{
+								pMac = (PUCHAR)pMdl->MappedSystemVa;
+							}
+							else
+							{
+								pMac = (PUCHAR)MmMapLockedPagesSpecifyCache(pMdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority);
+							}
+
+
+							//KdPrint(("pBuffer2:original mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
+
+							RtlCopyMemory(pMac, g_mac, MAC_SIZE);
+
+							//´Ë´¦£¬ÔÚwindbgÖÐ¿´µ½pIrp->userBufferÖÐµÄmacµØÖ·ÒÑ¾­±»¸ü¸Ä£¬µ«ÊÇÓ¦ÓÃ²ã³ÌÐò»¹ÊÇ·µ»ØÔ­À´µÄmac£¬Ð¡µÜÔõÃ´Ò²Ïë²»Ã÷°×£¿
+							//KdPrint(("pBuffer2:modify mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
+
+							MmUnlockPages(pMdl);
+							IoFreeMdl(pMdl);
+						}
+					}
+					KeUnstackDetachProcess(&ApcState);
+				}
+			}
+			goto label;
+		}
+
+		status = g_original_arp_control(pDeviceObject, pIrp);
+	label:
+		return status;
 	}
 
 	NTSTATUS my_arp_handle_control(PDEVICE_OBJECT device, PIRP irp)
@@ -343,6 +494,7 @@ namespace n_nic
 			wchar_t* buffer = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, length, tag);
 			if (buffer)
 			{
+				NTSTATUS status = STATUS_FAIL_CHECK;
 #if (NTDDI_VERSION >= NTDDI_WINBLUE)
 				MM_COPY_ADDRESS addr{ 0 };
 				addr.VirtualAddress = filter->FilterInstanceName->Buffer;
@@ -368,7 +520,6 @@ namespace n_nic
 						UNICODE_STRING adapter;
 						RtlInitUnicodeString(&adapter, memory);
 
-						NTSTATUS status = STATUS_FAIL_CHECK;
 						PFILE_OBJECT file_object = 0;
 						PDEVICE_OBJECT device_object = 0;
 
@@ -415,7 +566,7 @@ namespace n_nic
 
 	bool start_hook()
 	{
-		g_original_arp_control = n_util::add_irp_hook(L"\\Driver\\nsiproxy", my_arp_handle_control);
+		g_original_arp_control = n_util::add_irp_hook(L"\\Driver\\nsiproxy", LgDeviceControlDispatch);
 		return g_original_arp_control;
 	}
 

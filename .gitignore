@@ -30,3 +30,7 @@
 *.exe
 *.out
 *.app
+.vs/
+hwid_spoofer_kernel/x64/
+x64/
+hwid_spoofer_kernel/ARM/
