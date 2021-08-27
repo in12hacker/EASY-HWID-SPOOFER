@@ -42,7 +42,7 @@ namespace n_gpu
 						const char* gpu = "GPU-";
 						const size_t len = strlen(gpu);
 
-						for (int i = 0; i < length - len; i++)
+						for (int i = 0; i < length - (int)len; i++)
 						{
 							char* ptr = (char*)buffer + i;
 							if (0 == memcmp(ptr, gpu, strlen(gpu)))
