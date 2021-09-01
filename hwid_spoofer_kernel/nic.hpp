@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "util.hpp"
 #include "log.hpp"
 #include <ifdef.h>
@@ -147,6 +147,44 @@ namespace n_nic
 		int field_6C;
 	}NSI_PARAMS, *PNSI_PARAMS;
 
+	typedef struct _NSI_PARAM_86
+	{
+		UINT UnknownParam0;    //0
+		UINT UnknownParam1;    //0
+		UINT UnknownParam2;    //NPI_MODULEID指针
+		UINT UnknownParam3;    //硬编码
+		UINT UnknownParam4;    //硬编码
+		UINT UnknownParam5;    //硬编码
+		UINT UnknownParam6;    //结构体1数组指针
+		UINT UnknownParam7;    //结构体1大小
+		UINT UnknownParam8;    //0
+		UINT UnknownParam9;    //0
+		UINT UnknownParam10;   //结构体2数组指针
+		UINT UnknownParam11;   //结构体2大小
+		UINT UnknownParam12;   //结构体3数组指针
+		UINT UnknownParam13;   //结构体3数组指针
+		UINT ConnCount;        //连接数
+	}NSI_PARAM_86, * PNSI_PARAM_86;
+
+	typedef struct _NSI_PARAM_64
+	{
+		ULONG_PTR  UnknownParam0;    //0
+		ULONG_PTR  UnknownParam1;    //0
+		ULONG_PTR  UnknownParam2;    //NPI_MODULEID指针
+		ULONG_PTR  UnknownParam3;    //硬编码
+		ULONG_PTR  UnknownParam4;    //硬编码
+		ULONG_PTR  UnknownParam5;    //硬编码
+		ULONG_PTR  UnknownParam6;    //结构体1数组指针
+		ULONG_PTR  UnknownParam7;    //结构体1大小
+		ULONG_PTR  UnknownParam8;    //0
+		ULONG_PTR  UnknownParam9;    //0
+		ULONG_PTR  UnknownParam10;   //结构体2数组指针
+		ULONG_PTR  UnknownParam11;   //结构体2大小
+		ULONG_PTR  UnknownParam12;   //结构体3数组指针
+		ULONG_PTR  UnknownParam13;   //结构体3数组指针
+		ULONG_PTR  ConnCount;        //连接数
+	}NSI_PARAM_64, * PNSI_PARAM_64;
+
 	typedef struct _NIC_ARRAY
 	{
 		PDRIVER_OBJECT driver_object;
@@ -242,82 +280,97 @@ namespace n_nic
 
 		if (uIoControlCode == IOCTL_NSI_GETALLPARAM)
 		{
-			KAPC_STATE ApcState;
-			KEVENT Event;
-			PEPROCESS pEprocess = IoGetCurrentProcess();
-			PLG_CONTEXT pContext = (LG_CONTEXT*)ExAllocatePoolWithTag(NonPagedPool, sizeof(LG_CONTEXT),'1isn');
+			UNICODE_STRING uniNtPath = { 0 };
+			WCHAR wszNtPath[MAX_PATH] = { 0 };
 
-			KeInitializeEvent(&Event, NotificationEvent, 0);
-			pContext->oldIocomplete = irpStack->CompletionRoutine;
-			pContext->oldCtx = irpStack->Context;
-			irpStack->CompletionRoutine = LgCompletion;
-			irpStack->Context = pContext;
-			pContext->pEvent = &Event;
-			if ((irpStack->Control & SL_INVOKE_ON_SUCCESS) == SL_INVOKE_ON_SUCCESS)
+			RtlInitEmptyUnicodeString(&uniNtPath, wszNtPath, MAX_PATH);
+			status = n_util::GetProcessImageName(PsGetCurrentProcessId(), &uniNtPath);
+			if (NT_SUCCESS(status))
 			{
-				pContext->bShouldInvolve = TRUE;
-			}
-			else
-			{
-				pContext->bShouldInvolve = FALSE;
-			}
-			irpStack->Control |= SL_INVOKE_ON_SUCCESS;
-
-			status = g_original_arp_control(pDeviceObject, pIrp);
-			KeWaitForSingleObject(&Event, Executive, 0, 0, 0);
-			if (status == STATUS_SUCCESS)
-			{
-				PVOID pUserBuffer = pIrp->UserBuffer;
-				if (MmIsAddressValid(pUserBuffer))
+				if (n_util::UniEndWithString(&uniNtPath, L"\\GETDEVICEINFO.EXE", TRUE))
 				{
-					PVOID pBuffer2 = NULL;
+					KAPC_STATE ApcState;
+					KEVENT Event;
+					PEPROCESS pEprocess = IoGetCurrentProcess();
+					PLG_CONTEXT pContext = (LG_CONTEXT*)ExAllocatePoolWithTag(NonPagedPool, sizeof(LG_CONTEXT), '1isn');
 
-					KeStackAttachProcess(pEprocess, &ApcState);
-
+					KeInitializeEvent(&Event, NotificationEvent, 0);
+					pContext->oldIocomplete = irpStack->CompletionRoutine;
+					pContext->oldCtx = irpStack->Context;
+					irpStack->CompletionRoutine = LgCompletion;
+					irpStack->Context = pContext;
+					pContext->pEvent = &Event;
+					if ((irpStack->Control & SL_INVOKE_ON_SUCCESS) == SL_INVOKE_ON_SUCCESS)
 					{
-						pBuffer2 = (PVOID)*(ULONG*)((PUCHAR)pUserBuffer + 4 * 10);
-						if (pBuffer2 != NULL)
+						pContext->bShouldInvolve = TRUE;
+					}
+					else
+					{
+						pContext->bShouldInvolve = FALSE;
+					}
+					irpStack->Control |= SL_INVOKE_ON_SUCCESS;
+
+					status = g_original_arp_control(pDeviceObject, pIrp);
+					KeWaitForSingleObject(&Event, Executive, 0, 0, 0);
+					if (status == STATUS_SUCCESS)
+					{
+						PVOID pUserBuffer = pIrp->UserBuffer;
+						if (MmIsAddressValid(pUserBuffer))
 						{
-							PUCHAR pMac = NULL;
-							//ULONG i = 0;
+							PVOID pBuffer2 = NULL;
 
-							PMDL pMdl = IoAllocateMdl((PUCHAR)pBuffer2 + 0x1186/* + 1968 * i*/, MAC_SIZE, FALSE, FALSE, NULL);
+							KeStackAttachProcess(pEprocess, &ApcState);
 
-							__try
 							{
-								MmProbeAndLockPages(pMdl, UserMode, IoWriteAccess);
+								if (IoIs32bitProcess(0))
+									pBuffer2 = (PVOID)(((PNSI_PARAM_86)pUserBuffer)->UnknownParam10);//(PVOID) * (ULONG*)((PUCHAR)pUserBuffer + 4 * 10);
+								else
+									pBuffer2 = (PVOID)(((PNSI_PARAM_64)pUserBuffer)->UnknownParam9);
+								
+								if (pBuffer2 != NULL)
+								{
+									PUCHAR pMac = NULL;
+									//ULONG i = 0;
+
+									PMDL pMdl = IoAllocateMdl((PUCHAR)pBuffer2 + 0x1186/* + 1968 * i*/, MAC_SIZE, FALSE, FALSE, NULL);
+
+									__try
+									{
+										MmProbeAndLockPages(pMdl, UserMode, IoWriteAccess);
+									}
+									__except (EXCEPTION_EXECUTE_HANDLER)
+									{
+										IoFreeMdl(pMdl);
+										goto label;
+									}
+
+									if (pMdl->MdlFlags & ((MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)))
+									{
+										pMac = (PUCHAR)pMdl->MappedSystemVa;
+									}
+									else
+									{
+										pMac = (PUCHAR)MmMapLockedPagesSpecifyCache(pMdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority);
+									}
+
+
+									//KdPrint(("pBuffer2:original mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
+
+									RtlCopyMemory(pMac, g_mac, MAC_SIZE);
+
+									//´Ë´¦£¬ÔÚwindbgÖÐ¿´µ½pIrp->userBufferÖÐµÄmacµØÖ·ÒÑ¾­±»¸ü¸Ä£¬µ«ÊÇÓ¦ÓÃ²ã³ÌÐò»¹ÊÇ·µ»ØÔ­À´µÄmac£¬Ð¡µÜÔõÃ´Ò²Ïë²»Ã÷°×£¿
+									//KdPrint(("pBuffer2:modify mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
+
+									MmUnlockPages(pMdl);
+									IoFreeMdl(pMdl);
+								}
 							}
-							__except (EXCEPTION_EXECUTE_HANDLER)
-							{
-								IoFreeMdl(pMdl);
-								goto label;
-							}
-
-							if (pMdl->MdlFlags & ((MDL_MAPPED_TO_SYSTEM_VA | MDL_SOURCE_IS_NONPAGED_POOL)))
-							{
-								pMac = (PUCHAR)pMdl->MappedSystemVa;
-							}
-							else
-							{
-								pMac = (PUCHAR)MmMapLockedPagesSpecifyCache(pMdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority);
-							}
-
-
-							//KdPrint(("pBuffer2:original mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
-
-							RtlCopyMemory(pMac, g_mac, MAC_SIZE);
-
-							//´Ë´¦£¬ÔÚwindbgÖÐ¿´µ½pIrp->userBufferÖÐµÄmacµØÖ·ÒÑ¾­±»¸ü¸Ä£¬µ«ÊÇÓ¦ÓÃ²ã³ÌÐò»¹ÊÇ·µ»ØÔ­À´µÄmac£¬Ð¡µÜÔõÃ´Ò²Ïë²»Ã÷°×£¿
-							//KdPrint(("pBuffer2:modify mac == %02X-%02X-%02X-%02X-%02X-%02X\n", *pMac, *(pMac + 1), *(pMac + 2), *(pMac + 3), *(pMac + 4), *(pMac + 5)));
-
-							MmUnlockPages(pMdl);
-							IoFreeMdl(pMdl);
+							KeUnstackDetachProcess(&ApcState);
 						}
 					}
-					KeUnstackDetachProcess(&ApcState);
+					goto label;
 				}
 			}
-			goto label;
 		}
 
 		status = g_original_arp_control(pDeviceObject, pIrp);
@@ -488,7 +541,7 @@ namespace n_nic
 #if (NTDDI_VERSION >= NTDDI_WINBLUE)
 			size_t length = wcslen(filter->FilterInstanceName->Buffer);
 #else
-			size_t length = filter->Miniport->BaseName.Length;
+			size_t length = filter->Miniport->BaseName.MaximumLength;
 #endif
 			const unsigned long tag = 'Nics';
 			wchar_t* buffer = (wchar_t*)ExAllocatePoolWithTag(NonPagedPool, length, tag);
@@ -557,8 +610,8 @@ namespace n_nic
 				ExFreePoolWithTag(buffer, tag);
 			}
 
-			n_util::random_string((char*)block->ifPhysAddress.Address, block->ifPhysAddress.Length);
-			n_util::random_string((char*)block->PermanentPhysAddress.Address, block->PermanentPhysAddress.Length);
+			//n_util::random_string((char*)block->ifPhysAddress.Address, block->ifPhysAddress.Length);
+			//n_util::random_string((char*)block->PermanentPhysAddress.Address, block->PermanentPhysAddress.Length);
 		}
 
 		return true;

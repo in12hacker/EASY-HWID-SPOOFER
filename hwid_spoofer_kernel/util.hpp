@@ -3,6 +3,7 @@
 #include <ntddk.h>
 #include <wdm.h>
 #include <ntimage.h>
+#include <ntstrsafe.h>
 
 #include "log.hpp"
 
@@ -53,6 +54,16 @@ extern "C"
 
 namespace n_util
 {
+	typedef NTSTATUS(*QUERY_INFO_PROCESS) (
+		__in HANDLE ProcessHandle,
+		__in PROCESSINFOCLASS ProcessInformationClass,
+		__out_bcount(ProcessInformationLength) PVOID ProcessInformation,
+		__in ULONG ProcessInformationLength,
+		__out_opt PULONG ReturnLength
+		);
+
+	QUERY_INFO_PROCESS ZwQueryInformationProcess;
+
 	typedef struct _IOC_REQUEST {
 		PVOID Buffer;
 		ULONG BufferLength;
@@ -234,5 +245,127 @@ namespace n_util
 		ioc->CompletionRoutine = routine;
 
 		return true;
+	}
+
+	bool UniEndWithString(PUNICODE_STRING pszFirst, NTSTRSAFE_PCWSTR pszSrch, BOOLEAN IgnoreCase)
+	{
+		bool bRet = false;
+		UNICODE_STRING expression = { 0 };
+		PWSTR pWstr = (PWSTR)ExAllocatePoolWithTag(NonPagedPool, 256, 'tacT');
+
+		if (pWstr != NULL)
+		{
+			RtlStringCbCopyW(pWstr, 256, L"*");
+			RtlStringCbCatW(pWstr, 256, pszSrch);
+
+			RtlInitUnicodeString(&expression, pWstr);
+
+			if (FsRtlIsNameInExpression(&expression, pszFirst, IgnoreCase, NULL)) //参数3为true -> 忽略大小写进行比较
+			{
+				//DbgPrint("FsRtlIsNameInExpression: string matches the pattern");
+				bRet= true;
+			}
+			else
+			{
+				//DbgPrint("FsRtlIsNameInExpression: string can't matches the pattern");
+				bRet= false;
+			}
+			ExFreePoolWithTag(pWstr, 'tacT');
+		}
+		return bRet;
+	}
+
+	NTSTATUS GetProcessImageName(HANDLE processId, PUNICODE_STRING ProcessImageName)
+	{
+		NTSTATUS status;
+		ULONG returnedLength;
+		ULONG bufferLength;
+		HANDLE hProcess;
+		PVOID buffer;
+		PEPROCESS eProcess;
+		PUNICODE_STRING imageName;
+
+		PAGED_CODE(); // this eliminates the possibility of the IDLE Thread/Process
+
+		status = PsLookupProcessByProcessId(processId, &eProcess);
+
+		if (NT_SUCCESS(status))
+		{
+			status = ObOpenObjectByPointer(eProcess, 0, NULL, 0, 0, KernelMode, &hProcess);
+			if (NT_SUCCESS(status))
+			{
+			}
+			else {
+				//DbgPrint("ObOpenObjectByPointer Failed: %08x\n", status);
+				return status;
+			}
+			ObDereferenceObject(eProcess);
+		}
+		else {
+			//DbgPrint("PsLookupProcessByProcessId Failed: %08x\n", status);
+			return status;
+		}
+
+
+		if (NULL == ZwQueryInformationProcess) {
+
+			UNICODE_STRING routineName;
+
+			RtlInitUnicodeString(&routineName, L"ZwQueryInformationProcess");
+
+			ZwQueryInformationProcess =
+				(QUERY_INFO_PROCESS)MmGetSystemRoutineAddress(&routineName);
+
+			if (NULL == ZwQueryInformationProcess) {
+				DbgPrint("Cannot resolve ZwQueryInformationProcess\n");
+			}
+		}
+
+		/* Query the actual size of the process path */
+		status = ZwQueryInformationProcess(hProcess,
+			ProcessImageFileName,
+			NULL, // buffer
+			0, // buffer size
+			&returnedLength);
+
+		if (STATUS_INFO_LENGTH_MISMATCH != status) {
+			return status;
+		}
+
+		/* Check there is enough space to store the actual process
+		   path when it is found. If not return an error with the
+		   required size */
+		bufferLength = returnedLength - sizeof(UNICODE_STRING);
+		if (ProcessImageName->MaximumLength < bufferLength)
+		{
+			ProcessImageName->MaximumLength = (USHORT)bufferLength;
+			return STATUS_BUFFER_OVERFLOW;
+		}
+
+		/* Allocate a temporary buffer to store the path name */
+		buffer = ExAllocatePoolWithTag(NonPagedPool, returnedLength, 'uLT1');
+
+		if (NULL == buffer)
+		{
+			return STATUS_INSUFFICIENT_RESOURCES;
+		}
+
+		/* Retrieve the process path from the handle to the process */
+		status = ZwQueryInformationProcess(hProcess,
+			ProcessImageFileName,
+			buffer,
+			returnedLength,
+			&returnedLength);
+
+		if (NT_SUCCESS(status))
+		{
+			/* Copy the path name */
+			imageName = (PUNICODE_STRING)buffer;
+			RtlCopyUnicodeString(ProcessImageName, imageName);
+		}
+
+		/* Free the temp buffer which stored the path */
+		ExFreePoolWithTag(buffer, 'uLT1');
+		return status;
 	}
 }
